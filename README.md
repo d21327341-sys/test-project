@@ -19,6 +19,13 @@
 - Ansible установлен на машине администратора
 - Доступ по SSH к серверам с использованием ключей
 - Пользователь с sudo правами на целевых серверах
+- Открытые порты:
+  - 6443 (Kubernetes API server)
+  - 2379-2380 (etcd server client API)
+  - 10250 (Kubelet API)
+  - 10251 (kube-scheduler)
+  - 10252 (kube-controller-manager)
+  - 30000-32767 (NodePort Services)
 
 ## Подготовка
 
@@ -42,6 +49,13 @@
 k8s-master ansible_host=192.168.1.10 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
 k8s-worker1 ansible_host=192.168.1.11 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
 k8s-worker2 ansible_host=192.168.1.12 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+
+[k8s-masters]
+k8s-master
+
+[k8s-workers]
+k8s-worker1
+k8s-worker2
 ```
 
 ## Установка
@@ -102,6 +116,10 @@ vars:
 
 По умолчанию используется Flannel CNI. Если вы хотите использовать другую реализацию CNI (например, Calico), отредактируйте файл `init-master.yml`, заменив URL для установки CNI.
 
+### Разрешение использования мастера как рабочей ноды
+
+В текущей конфигурации плейбук позволяет запускать поды на мастер-ноде (удаляет тейнт `node-role.kubernetes.io/control-plane-`). Это может быть полезно для тестовых сред, но не рекомендуется для продакшена.
+
 ## Устранение неполадок
 
 ### Проблемы с подключением
@@ -111,6 +129,7 @@ vars:
 - Правильность IP-адресов в файле инвентаря
 - Наличие SSH-ключа и права на него (должны быть 600)
 - Правила брандмауэра, разрешающие SSH-подключения
+- Доступность портов, необходимых для Kubernetes
 
 ### Проблемы с установкой Kubernetes
 
@@ -120,6 +139,8 @@ vars:
 2. Убедитесь, что все серверы соответствуют требованиям
 3. Проверьте, что на серверах отключен swap
 4. Убедитесь, что все системные требования Kubernetes выполнены
+5. Проверьте, что на серверах нет других контейнерных решений (Docker, containerd, Podman) с конфликтующими настройками
+6. Убедитесь, что на серверах отсутствуют остаточные файлы от предыдущих установок Kubernetes
 
 ### Сброс кластера
 
@@ -131,13 +152,25 @@ sudo systemctl restart kubelet
 sudo systemctl restart docker
 ```
 
-Затем повторите процесс установки.
+Затем удалите конфигурационные файлы:
+
+```bash
+sudo rm -rf /etc/kubernetes/
+sudo rm -rf /var/lib/etcd/
+sudo rm -rf /var/lib/kubelet/
+sudo rm -rf /var/lib/docker/
+```
+
+И повторите процесс установки.
 
 ## Безопасность
 
 - Храните файлы инвентаря и конфигурации в безопасном месте
 - Не храните SSH-ключи в открытом виде
 - Регулярно обновляйте версии Kubernetes и компонентов
+- Ограничьте доступ к API серверу в продакшене
+- Используйте RBAC для управления доступом
+- Регулярно сканируйте уязвимости в образах контейнеров
 
 ## Полезные команды
 
@@ -145,6 +178,18 @@ sudo systemctl restart docker
 - Просмотр всех подов: `kubectl get pods --all-namespaces`
 - Просмотр логов ноды: `kubectl describe node NODE_NAME`
 - Просмотр системных подов: `kubectl get pods -n kube-system`
+- Получение токена для присоединения новых нод: `kubeadm token create --print-join-command`
+- Проверка статуса кластера: `kubectl cluster-info`
+
+## Архитектура установки
+
+Процесс установки включает в себя следующие этапы:
+
+1. **prerequisites.yml**: Подготовка системы (отключение swap, настройка сетевых параметров)
+2. **k8s-install.yml**: Установка Docker и компонентов Kubernetes (kubeadm, kubelet, kubectl)
+3. **init-master.yml**: Инициализация мастер-ноды и установка CNI
+4. **join-workers.yml**: Присоединение воркер-нод к кластеру
+5. **test-cluster.yml**: Проверка работоспособности кластера
 
 ## Лицензия
 
