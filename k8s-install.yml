@@ -4,62 +4,106 @@
   become: yes
 
   tasks:
-    # Установка Docker
-    - name: Установка зависимостей для Docker
+    # Установка containerd
+    - name: Установка зависимостей для containerd
       apt:
         name:
-          - apt-transport-https
           - ca-certificates
           - curl
-          - gnupg-agent
-          - software-properties-common
+          - gnupg
+          - lsb-release
         state: present
         update_cache: yes
 
-    - name: Добавление Docker GPG ключа
-      apt_key:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
+    - name: Создание директории для keyrings
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
 
-    - name: Добавление Docker репозитория
+    - name: Добавление Docker GPG ключа (для containerd.io)
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.gpg
+        mode: '0644'
+
+    - name: Добавление Docker репозитория (для containerd.io)
       apt_repository:
-        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
         state: present
       register: docker_repo_result
       retries: 3
       delay: 5
       until: docker_repo_result is succeeded
 
-    - name: Установка Docker
+    - name: Установка containerd
       apt:
-        name: 
-          - docker-ce={{ docker_version }}.*
-          - docker-ce-cli={{ docker_version }}.*
+        name:
           - containerd.io
         state: present
         update_cache: yes
-      register: docker_install_result
+      register: containerd_install_result
       retries: 3
       delay: 5
-      until: docker_install_result is succeeded
-      notify: restart docker
+      until: containerd_install_result is succeeded
+      notify: restart containerd
 
-    - name: Запуск и включение Docker сервиса
+    - name: Обеспечение директории конфигурации containerd
+      file:
+        path: /etc/containerd
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Проверка наличия конфигурации containerd
+      stat:
+        path: /etc/containerd/config.toml
+      register: containerd_config_stat
+
+    - name: Генерация конфигурации containerd по умолчанию
+      command: containerd config default
+      register: containerd_default_config
+      changed_when: false
+      when: not containerd_config_stat.stat.exists
+
+    - name: Запись конфигурации containerd по умолчанию
+      copy:
+        content: "{{ containerd_default_config.stdout }}"
+        dest: /etc/containerd/config.toml
+        owner: root
+        group: root
+        mode: '0644'
+      when: not containerd_config_stat.stat.exists
+      notify: restart containerd
+
+    - name: Включение SystemdCgroup в containerd
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^(\s*SystemdCgroup\s*=\s*)false'
+        line: '\1true'
+        backrefs: yes
+      notify: restart containerd
+
+    - name: Добавление SystemdCgroup в containerd (если отсутствует)
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*SystemdCgroup\s*='
+        insertafter: '^\s*\[plugins\."io\.containerd\.grpc\.v1\.cri"\.containerd\.runtimes\.runc\.options\]'
+        line: '            SystemdCgroup = true'
+      when: containerd_config_stat.stat.exists
+      notify: restart containerd
+
+    - name: Запуск и включение containerd
       systemd:
-        name: docker
+        name: containerd
         enabled: yes
         state: started
         daemon_reload: yes
-      register: docker_service_result
+      register: containerd_service_result
       retries: 3
       delay: 2
-      until: docker_service_result is succeeded
-
-    - name: Добавление пользователя в группу Docker
-      user:
-        name: "{{ ansible_user }}"
-        groups: docker
-        append: yes
+      until: containerd_service_result is succeeded
 
     # Установка Kubernetes компонентов
     - name: Установка зависимостей для Kubernetes
@@ -69,10 +113,17 @@
           - apt-transport-https
         state: present
 
-    - name: Добавление Kubernetes GPG ключа
-      apt_key:
-        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
-        state: present
+    - name: Создание директории для keyrings Kubernetes
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Добавление Kubernetes GPG ключа (pkgs.k8s.io)
+      get_url:
+        url: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mode: '0644'
       register: k8s_key_result
       retries: 3
       delay: 5
@@ -122,9 +173,9 @@
       until: kubelet_service_result is succeeded
 
   handlers:
-    - name: restart docker
+    - name: restart containerd
       systemd:
-        name: docker
+        name: containerd
         state: restarted
 
     - name: restart kubelet

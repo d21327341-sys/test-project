@@ -4,23 +4,23 @@
   become: yes
 
   tasks:
-    # Копирование команды присоединения с мастера
-    - name: Копирование команды присоединения с мастера
-      fetch:
-        src: /tmp/kubeadm-join-command
-        dest: /tmp/kubeadm-join-command
-        flat: yes
+    # Получение команды присоединения с мастера
+    - name: Генерация команды присоединения на мастере
+      command: kubeadm token create --print-join-command
       delegate_to: "{{ groups['k8s-masters'][0] }}"
+      run_once: yes
+      register: join_command_raw
 
-    # Установка прав на выполнение команды
-    - name: Установка прав на выполнение команды
-      file:
-        path: /tmp/kubeadm-join-command
-        mode: '0755'
+    - name: Сохранение команды присоединения как факт на мастере
+      set_fact:
+        kubeadm_join_command: "{{ join_command_raw.stdout }}"
+      delegate_to: "{{ groups['k8s-masters'][0] }}"
+      delegate_facts: true
+      run_once: yes
 
     # Выполнение команды присоединения
     - name: Присоединение к кластеру
-      command: /tmp/kubeadm-join-command
+      command: "{{ hostvars[groups['k8s-masters'][0]].kubeadm_join_command }}"
       args:
         creates: /etc/kubernetes/kubelet.conf
       retries: 3

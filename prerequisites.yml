@@ -19,16 +19,22 @@
       when: ansible_swaptotal_mb > 0
 
     # Настройка sysctl параметров
-    - name: Включение br_netfilter модуля
+    - name: Включение модулей ядра для Kubernetes
       modprobe:
-        name: br_netfilter
+        name: "{{ item }}"
         state: present
+      loop:
+        - br_netfilter
+        - overlay
 
-    - name: Загрузка br_netfilter модуля при старте
+    - name: Загрузка модулей ядра при старте
       lineinfile:
         dest: /etc/modules-load.d/k8s.conf
-        line: br_netfilter
+        line: "{{ item }}"
         create: yes
+      loop:
+        - br_netfilter
+        - overlay
 
     - name: Установка параметров sysctl для Kubernetes
       sysctl:
@@ -53,13 +59,21 @@
         - 'net.ipv4.ip_forward = 1'
 
     # Настройка требований к CPU и памяти
-    - name: Установка ограничений для kube-proxy
+    - name: Обеспечение директории drop-in для kubelet
+      file:
+        path: /etc/systemd/system/kubelet.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Включение учета ресурсов для kubelet (drop-in)
       copy:
         content: |
           [Service]
           CPUAccounting=true
           MemoryAccounting=true
-        dest: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+        dest: /etc/systemd/system/kubelet.service.d/20-resource-accounting.conf
         owner: root
         group: root
         mode: '0644'

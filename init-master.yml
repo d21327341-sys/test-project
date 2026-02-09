@@ -10,7 +10,7 @@
         kubeadm init
         --pod-network-cidr={{ pod_network_cidr }}
         --service-cidr={{ service_cidr }}
-        --apiserver-advertise-address={{ ansible_default_ipv4.address }}
+        --apiserver-advertise-address={{ api_advertise_address | default(ansible_host) }}
         --kubernetes-version=v{{ kubernetes_version }}
       register: kubeadm_init_result
       args:
@@ -39,13 +39,15 @@
         owner: "{{ ansible_user }}"
         mode: '0644'
 
-    # Установка Flannel CNI
+    # Установка CNI
     - name: Установка Flannel CNI
       become: no
-      command: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+      command: kubectl apply -f {{ flannel_manifest_url }}
       environment:
         KUBECONFIG: /home/{{ ansible_user }}/.kube/config
-      when: kubeadm_init_result.changed
+      when:
+        - kubeadm_init_result.changed
+        - cni_plugin == 'flannel'
       retries: 3
       delay: 5
       register: flannel_install
@@ -54,6 +56,23 @@
         - name: Сообщение об ошибке установки CNI
           debug:
             msg: "⚠️  Flannel не установился, но это не критично. Проверьте доступ в интернет"
+
+    - name: Установка Calico CNI
+      become: no
+      command: kubectl apply -f {{ calico_manifest_url }}
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+      when:
+        - kubeadm_init_result.changed
+        - cni_plugin == 'calico'
+      retries: 3
+      delay: 5
+      register: calico_install
+      until: calico_install is succeeded
+      rescue:
+        - name: Сообщение об ошибке установки CNI
+          debug:
+            msg: "⚠️  Calico не установился, но это не критично. Проверьте доступ в интернет"
 
     # Получение токена для присоединения воркеров
     - name: Получение токена для присоединения нод
@@ -69,17 +88,12 @@
         kubeadm_join_command: "{{ join_command.stdout }}"
       when: kubeadm_init_result.changed
 
-    - name: Запись команды присоединения в файл
-      copy:
-        content: "{{ kubeadm_join_command }}"
-        dest: /tmp/kubeadm-join-command
-        mode: '0644'
-      when: kubeadm_init_result.changed
-
     # Разрешение использования мастера как рабочей ноды (опционально)
     - name: Разрешение запуска подов на мастере (опционально)
       become: no
       command: kubectl taint nodes --all node-role.kubernetes.io/control-plane-
       environment:
         KUBECONFIG: /home/{{ ansible_user }}/.kube/config
-      when: kubeadm_init_result.changed
+      when:
+        - kubeadm_init_result.changed
+        - allow_schedule_on_master | bool
