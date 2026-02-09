@@ -11,6 +11,7 @@
         --pod-network-cidr={{ pod_network_cidr }}
         --service-cidr={{ service_cidr }}
         --apiserver-advertise-address={{ api_advertise_address | default(ansible_host) }}
+        --cri-socket=unix:///run/containerd/containerd.sock
         --kubernetes-version=v{{ kubernetes_version }}
       register: kubeadm_init_result
       args:
