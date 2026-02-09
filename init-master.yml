@@ -1,0 +1,62 @@
+---
+- name: Инициализация Kubernetes мастер-ноды
+  hosts: k8s-masters
+  become: yes
+
+  tasks:
+    # Инициализация кластера kubeadm
+    - name: Инициализация Kubernetes кластера
+      command: kubeadm init --pod-network-cidr=192.168.0.0/16 --apiserver-advertise-address={{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+      register: kubeadm_init_result
+      args:
+        creates: /etc/kubernetes/admin.conf
+
+    # Настройка kubectl для пользователя
+    - name: Создание директории .kube
+      file:
+        path: /home/{{ ansible_user }}/.kube
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Копирование admin.conf в домашнюю директорию пользователя
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/{{ ansible_user }}/.kube/config
+        remote_src: yes
+        owner: "{{ ansible_user }}"
+        mode: '0644'
+
+    # Установка Flannel CNI
+    - name: Установка Flannel CNI
+      become: no
+      command: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+      when: kubeadm_init_result.changed
+
+    # Получение токена для присоединения воркеров
+    - name: Получение токена для присоединения нод
+      command: kubeadm token create --print-join-command
+      register: join_command
+      when: kubeadm_init_result.changed
+
+    - name: Сохранение команды присоединения в переменную
+      set_fact:
+        kubeadm_join_command: "{{ join_command.stdout }}"
+      when: kubeadm_init_result.changed
+
+    - name: Запись команды присоединения в файл
+      copy:
+        content: "{{ kubeadm_join_command }}"
+        dest: /tmp/kubeadm-join-command
+        mode: '0644'
+      when: kubeadm_init_result.changed
+
+    # Разрешение использования мастера как рабочей ноды (опционально)
+    - name: Разрешение запуска подов на мастере (опционально)
+      become: no
+      command: kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+      when: kubeadm_init_result.changed

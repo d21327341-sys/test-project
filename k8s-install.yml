@@ -1,0 +1,92 @@
+---
+- name: Установка Kubernetes кластера
+  hosts: k8s-cluster
+  become: yes
+  vars:
+    docker_version: '20.10.21'
+    kubernetes_version: '1.28.0'
+
+  tasks:
+    # Установка Docker
+    - name: Установка зависимостей для Docker
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg-agent
+          - software-properties-common
+        state: present
+        update_cache: yes
+
+    - name: Добавление Docker GPG ключа
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Добавление Docker репозитория
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        state: present
+
+    - name: Установка Docker
+      apt:
+        name: 
+          - docker-ce={{ docker_version }}
+          - docker-ce-cli={{ docker_version }}
+          - containerd.io
+        state: present
+        update_cache: yes
+
+    - name: Запуск и включение Docker сервиса
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Добавление пользователя в группу Docker
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    # Установка Kubernetes компонентов
+    - name: Установка зависимостей для Kubernetes
+      apt:
+        name:
+          - curl
+          - apt-transport-https
+        state: present
+
+    - name: Добавление Kubernetes GPG ключа
+      apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+
+    - name: Добавление Kubernetes репозитория
+      apt_repository:
+        repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+        state: present
+
+    - name: Установка kubeadm, kubelet и kubectl
+      apt:
+        name:
+          - kubelet={{ kubernetes_version }}-00
+          - kubeadm={{ kubernetes_version }}-00
+          - kubectl={{ kubernetes_version }}-00
+        state: present
+        update_cache: yes
+
+    - name: Установка hold на пакеты Kubernetes
+      apt:
+        name:
+          - kubelet={{ kubernetes_version }}-00
+          - kubeadm={{ kubernetes_version }}-00
+          - kubectl={{ kubernetes_version }}-00
+        state: hold
+
+    - name: Включение и запуск kubelet
+      systemd:
+        name: kubelet
+        enabled: yes
+        state: started

@@ -1,0 +1,72 @@
+---
+- name: Настройка предварительных условий для Kubernetes
+  hosts: k8s-cluster
+  become: yes
+
+  tasks:
+    # Отключение swap
+    - name: Отключение swap
+      command: swapoff -a
+      when: ansible_swaptotal_mb > 0
+
+    - name: Комментирование swap в /etc/fstab
+      lineinfile:
+        path: /etc/fstab
+        regexp: 'swap'
+        line: '# {{ item.line }}'
+        backup: yes
+      loop: "{{ lookup('file', '/etc/fstab').splitlines() | select('regex', 'swap') | map('regex_replace', '(.*)', '\\1') | list | zip(ansible_mounts | selectattr('fstype', 'equalto', 'swap') | list) | list }}"
+      when: ansible_swaptotal_mb > 0
+
+    # Настройка sysctl параметров
+    - name: Включение br_netfilter модуля
+      modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Загрузка br_netfilter модуля при старте
+      lineinfile:
+        dest: /etc/modules-load.d/k8s.conf
+        line: br_netfilter
+        create: yes
+
+    - name: Установка параметров sysctl для Kubernetes
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+        - { name: 'net.ipv4.ip_forward', value: '1' }
+
+    # Настройка iptables
+    - name: Проверка наличия параметра в /etc/sysctl.conf
+      lineinfile:
+        path: /etc/sysctl.conf
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - 'net.bridge.bridge-nf-call-ip6tables = 1'
+        - 'net.bridge.bridge-nf-call-iptables = 1'
+        - 'net.ipv4.ip_forward = 1'
+
+    # Настройка требований к CPU и памяти
+    - name: Установка ограничений для kube-proxy
+      copy:
+        content: |
+          [Service]
+          CPUAccounting=true
+          MemoryAccounting=true
+        dest: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart kubelet
+
+  handlers:
+    - name: restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted

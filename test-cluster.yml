@@ -1,0 +1,68 @@
+---
+- name: Тестирование Kubernetes кластера
+  hosts: k8s-masters
+  become: no
+
+  tasks:
+    # Проверка статуса нод
+    - name: Проверка статуса нод
+      command: kubectl get nodes
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+      register: nodes_status
+
+    - name: Вывод статуса нод
+      debug:
+        var: nodes_status.stdout_lines
+
+    # Проверка количества нод
+    - name: Подсчет количества готовых нод
+      command: kubectl get nodes --no-headers -o custom-columns=STATUS:.status.conditions[-1].type
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+      register: node_conditions
+
+    - name: Проверка, что все ноды в состоянии Ready
+      fail:
+        msg: "Не все ноды находятся в состоянии Ready"
+      when: "'Ready' not in node_conditions.stdout_lines"
+
+    # Создание тестового пода
+    - name: Создание тестового манифеста
+      copy:
+        content: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: test-pod
+            namespace: default
+          spec:
+            containers:
+            - name: test-container
+              image: nginx:latest
+              ports:
+              - containerPort: 80
+        dest: /tmp/test-pod.yaml
+        mode: '0644'
+
+    - name: Применение тестового манифеста
+      command: kubectl apply -f /tmp/test-pod.yaml
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+
+    - name: Ожидание запуска тестового пода
+      command: kubectl wait --for=condition=ready pod/test-pod --timeout=120s
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+      register: pod_status
+
+    - name: Вывод статуса тестового пода
+      debug:
+        var: pod_status
+
+    # Удаление тестового пода
+    - name: Удаление тестового пода
+      command: kubectl delete -f /tmp/test-pod.yaml
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+      when: pod_status is succeeded

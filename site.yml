@@ -1,0 +1,6 @@
+---
+- import_playbook: prerequisites.yml
+- import_playbook: k8s-install.yml
+- import_playbook: init-master.yml
+- import_playbook: join-workers.yml
+- import_playbook: test-cluster.yml
