@@ -1,0 +1,48 @@
+# Ansible
+.ansible/
+ansible.cfg
+*.retry
+*.pyc
+__pycache__/
+
+# Sensitive data
+inventory.ini
+*.pem
+*.key
+*.pub
+id_rsa*
+ssh_key*
+~/.ssh/
+
+# Kubeadm files
+/tmp/kubeadm-join-command
+/tmp/test-pod.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.gitkeep
+
+# Custom
+.env
+.env.local
+hosts.txt

@@ -1,0 +1,79 @@
+---
+- name: Предварительная проверка требований кластера
+  hosts: k8s-cluster
+  gather_facts: yes
+  become: yes
+
+  vars:
+    required_open_ports:
+      - port: 6443
+        proto: tcp
+        desc: "Kubernetes API server"
+      - port: 2379
+        proto: tcp
+        desc: "etcd server client API"
+      - port: 2380
+        proto: tcp
+        desc: "etcd peer communication"
+      - port: 10250
+        proto: tcp
+        desc: "Kubelet API"
+    master_required_ports: [6443, 2379, 2380, 10250, 10251, 10252]
+    worker_required_ports: [10250, 10256]
+
+  tasks:
+    - name: Проверка версии OS
+      assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_version is version('20.04', '>=')
+        fail_msg: "Требуется Ubuntu 20.04 или выше. Текущая версия: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+    - name: Проверка минимального объема RAM
+      assert:
+        that:
+          - ansible_memtotal_mb >= 2048
+        fail_msg: "Минимум требуется 2GB RAM. Доступно: {{ ansible_memtotal_mb }}MB"
+
+    - name: Проверка минимального количества CPU
+      assert:
+        that:
+          - ansible_processor_vcpus >= 2
+        fail_msg: "Минимум требуется 2 CPU. Доступно: {{ ansible_processor_vcpus }}"
+
+    - name: Проверка дискового пространства
+      assert:
+        that:
+          - ansible_mounts[0].size_available >= 5368709120  # 5GB
+        fail_msg: "Минимум требуется 5GB свободного места. Доступно: {{ (ansible_mounts[0].size_available / 1024 / 1024 / 1024) | int }}GB"
+
+    - name: Проверка отключения swap
+      assert:
+        that:
+          - ansible_swaptotal_mb == 0
+        fail_msg: "Swap должен быть отключен. Текущее значение: {{ ansible_swaptotal_mb }}MB"
+      ignore_errors: yes
+      register: swap_check
+
+    - name: Предупреждение о swap
+      debug:
+        msg: "⚠️  ВНИМАНИЕ: Swap не отключен! Это может привести к проблемам с Kubernetes"
+      when: swap_check.failed
+
+    - name: Проверка доступности мастер-ноды
+      wait_for:
+        host: "{{ hostvars[groups['k8s-masters'][0]]['ansible_host'] }}"
+        port: 22
+        state: started
+        delay: 1
+        timeout: 10
+      when: inventory_hostname != groups['k8s-masters'][0]
+
+    - name: Проверка подключения Ansible к мастер-ноде
+      ping:
+      delegate_to: "{{ groups['k8s-masters'][0] }}"
+
+    - name: Уведомление о прохождении всех проверок
+      debug:
+        msg: "✅ Все предварительные проверки пройдены успешно"
+      run_once: yes

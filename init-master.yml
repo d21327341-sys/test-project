@@ -6,10 +6,22 @@
   tasks:
     # Инициализация кластера kubeadm
     - name: Инициализация Kubernetes кластера
-      command: kubeadm init --pod-network-cidr=192.168.0.0/16 --apiserver-advertise-address={{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+      command: >
+        kubeadm init
+        --pod-network-cidr={{ pod_network_cidr }}
+        --service-cidr={{ service_cidr }}
+        --apiserver-advertise-address={{ ansible_default_ipv4.address }}
+        --kubernetes-version=v{{ kubernetes_version }}
       register: kubeadm_init_result
       args:
         creates: /etc/kubernetes/admin.conf
+      retries: 2
+      delay: 10
+      until: kubeadm_init_result is succeeded
+      rescue:
+        - name: Сообщение об ошибке инициализации кластера
+          debug:
+            msg: "❌ Ошибка инициализации кластера. Убедитесь, что kubelet запущен"
 
     # Настройка kubectl для пользователя
     - name: Создание директории .kube
@@ -34,12 +46,23 @@
       environment:
         KUBECONFIG: /home/{{ ansible_user }}/.kube/config
       when: kubeadm_init_result.changed
+      retries: 3
+      delay: 5
+      register: flannel_install
+      until: flannel_install is succeeded
+      rescue:
+        - name: Сообщение об ошибке установки CNI
+          debug:
+            msg: "⚠️  Flannel не установился, но это не критично. Проверьте доступ в интернет"
 
     # Получение токена для присоединения воркеров
     - name: Получение токена для присоединения нод
       command: kubeadm token create --print-join-command
       register: join_command
       when: kubeadm_init_result.changed
+      retries: 3
+      delay: 5
+      until: join_command is succeeded
 
     - name: Сохранение команды присоединения в переменную
       set_fact:

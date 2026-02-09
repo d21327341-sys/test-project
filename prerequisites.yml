@@ -12,10 +12,10 @@
     - name: Комментирование swap в /etc/fstab
       lineinfile:
         path: /etc/fstab
-        regexp: 'swap'
-        line: '# {{ item.line }}'
+        regexp: '^([^#].*\s+swap\s+)'
+        line: '# \1'
+        backrefs: yes
         backup: yes
-      loop: "{{ lookup('file', '/etc/fstab').splitlines() | select('regex', 'swap') | map('regex_replace', '(.*)', '\\1') | list | zip(ansible_mounts | selectattr('fstype', 'equalto', 'swap') | list) | list }}"
       when: ansible_swaptotal_mb > 0
 
     # Настройка sysctl параметров

@@ -2,9 +2,6 @@
 - name: Установка Kubernetes кластера
   hosts: k8s-cluster
   become: yes
-  vars:
-    docker_version: '20.10.21'
-    kubernetes_version: '1.28.0'
 
   tasks:
     # Установка Docker
@@ -28,21 +25,35 @@
       apt_repository:
         repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
         state: present
+      register: docker_repo_result
+      retries: 3
+      delay: 5
+      until: docker_repo_result is succeeded
 
     - name: Установка Docker
       apt:
         name: 
-          - docker-ce={{ docker_version }}
-          - docker-ce-cli={{ docker_version }}
+          - docker-ce={{ docker_version }}.*
+          - docker-ce-cli={{ docker_version }}.*
           - containerd.io
         state: present
         update_cache: yes
+      register: docker_install_result
+      retries: 3
+      delay: 5
+      until: docker_install_result is succeeded
+      notify: restart docker
 
     - name: Запуск и включение Docker сервиса
       systemd:
         name: docker
         enabled: yes
         state: started
+        daemon_reload: yes
+      register: docker_service_result
+      retries: 3
+      delay: 2
+      until: docker_service_result is succeeded
 
     - name: Добавление пользователя в группу Docker
       user:
@@ -62,31 +73,61 @@
       apt_key:
         url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
         state: present
+      register: k8s_key_result
+      retries: 3
+      delay: 5
+      until: k8s_key_result is succeeded
 
     - name: Добавление Kubernetes репозитория
       apt_repository:
-        repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+        repo: "{{ kubernetes_repo }}"
         state: present
+      register: k8s_repo_result
+      retries: 3
+      delay: 5
+      until: k8s_repo_result is succeeded
 
     - name: Установка kubeadm, kubelet и kubectl
       apt:
         name:
-          - kubelet={{ kubernetes_version }}-00
-          - kubeadm={{ kubernetes_version }}-00
-          - kubectl={{ kubernetes_version }}-00
+          - "kubelet={{ kubernetes_version }}-*"
+          - "kubeadm={{ kubernetes_version }}-*"
+          - "kubectl={{ kubernetes_version }}-*"
         state: present
         update_cache: yes
+      register: k8s_install_result
+      retries: 3
+      delay: 5
+      until: k8s_install_result is succeeded
+      notify: restart kubelet
 
     - name: Установка hold на пакеты Kubernetes
-      apt:
-        name:
-          - kubelet={{ kubernetes_version }}-00
-          - kubeadm={{ kubernetes_version }}-00
-          - kubectl={{ kubernetes_version }}-00
-        state: hold
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
 
     - name: Включение и запуск kubelet
       systemd:
         name: kubelet
         enabled: yes
         state: started
+        daemon_reload: yes
+      register: kubelet_service_result
+      retries: 3
+      delay: 2
+      until: kubelet_service_result is succeeded
+
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+
+    - name: restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted
