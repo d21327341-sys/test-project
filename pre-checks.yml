@@ -41,11 +41,16 @@
           - ansible_processor_vcpus >= 2
         fail_msg: "Минимум требуется 2 CPU. Доступно: {{ ansible_processor_vcpus }}"
 
-    - name: Проверка дискового пространства
+    - name: Определение корневого раздела
+      set_fact:
+        root_mount: "{{ (ansible_mounts | selectattr('mount', 'equalto', '/') | list | first) }}"
+
+    - name: Проверка дискового пространства на корневом разделе
       assert:
         that:
-          - ansible_mounts[0].size_available >= 5368709120  # 5GB
-        fail_msg: "Минимум требуется 5GB свободного места. Доступно: {{ (ansible_mounts[0].size_available / 1024 / 1024 / 1024) | int }}GB"
+          - root_mount is defined
+          - root_mount.size_available >= 5368709120  # 5GB
+        fail_msg: "Минимум требуется 5GB свободного места на /. Доступно: {{ (root_mount.size_available / 1024 / 1024 / 1024) | int }}GB"
 
     - name: Проверка отключения swap
       assert:

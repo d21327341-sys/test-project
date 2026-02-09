@@ -16,8 +16,8 @@
         var: nodes_status.stdout_lines
 
     # Проверка количества нод
-    - name: Подсчет количества готовых нод
-      command: kubectl get nodes --no-headers -o custom-columns=STATUS:.status.conditions[-1].type
+    - name: Получение статуса Ready для каждой ноды
+      command: kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name} {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
       environment:
         KUBECONFIG: /home/{{ ansible_user }}/.kube/config
       register: node_conditions
@@ -25,7 +25,9 @@
     - name: Проверка, что все ноды в состоянии Ready
       fail:
         msg: "Не все ноды находятся в состоянии Ready"
-      when: "'Ready' not in node_conditions.stdout_lines"
+      when: >
+        node_conditions.stdout_lines | length == 0 or
+        (node_conditions.stdout_lines | select('search', ' True$') | list | length) != (node_conditions.stdout_lines | length)
 
     # Создание тестового пода
     - name: Создание тестового манифеста
@@ -39,7 +41,7 @@
           spec:
             containers:
             - name: test-container
-              image: nginx:latest
+              image: nginx:1.25
               ports:
               - containerPort: 80
         dest: /tmp/test-pod.yaml

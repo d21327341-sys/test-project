@@ -1,8 +1,7 @@
 ---
 # ========================================
-# Kubernetes и Docker версии
+# Kubernetes версии и репозиторий
 # ========================================
-docker_version: '25.0.3'
 kubernetes_version: '1.31.0'
 kubernetes_repo: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb /'
 
@@ -17,6 +16,8 @@ service_cidr: '10.96.0.0/12'
 # ========================================
 container_runtime: 'containerd'  # containerd или docker
 cni_plugin: 'flannel'  # flannel или calico
+flannel_manifest_url: 'https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml'
+calico_manifest_url: 'https://raw.githubusercontent.com/projectcalico/calico/master/manifests/calico.yaml'
 
 # ========================================
 # Параметры Kubernetes
@@ -41,6 +42,11 @@ nodeport_range: '30000-32767'
 # ========================================
 enable_rbac: true
 tls_enabled: true
+
+# ========================================
+# Поведение мастера
+# ========================================
+allow_schedule_on_master: false
 
 # ========================================
 # Таймауты и лимиты
